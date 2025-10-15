@@ -1,10 +1,12 @@
 # ServerDashboard
 
 This is a python app that provides a nice simple webinterface to monitor linux servers and services, using only SSH and few apt packages on targets.
-
+ujtio s
 See Py and Json file for packages needed and config.
 
 The data is updated every 600 seconds by SSH from each host and the interface refreshes all 120 seconds.
+
+A mobile interface designed for iPhone and Android with relatively high resolution screen is included, see DEMO pictures.
 
 
 This monitors/Shows:
