@@ -88,7 +88,8 @@ python3 server_status.py --add-server
 This interactive command:
 - Prompts you for the server name, IP/hostname, SSH user, and country code. Only name and IP/hostname are mandatory if SSH runs on port 22.
 - Adds the new entry automatically to your `servers.json`.
-- Optionally offers to **copy your public SSH key** to the new server for passwordless access.
+- Optionally offers to **copy your public SSH key** to the new server (for this you need the root password or another local SSH key added).
+- Restart to load the new server.
 
 ---
 
