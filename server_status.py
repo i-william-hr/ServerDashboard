@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Server Status - single-file Flask webapp (sample tailored)
 
@@ -9,7 +10,7 @@ What it does
   2. A secret token in the URL (e.g., ?auth=YOUR_TOKEN) for easy access from bookmarks.
 - Includes a demo mode (?demo) to obfuscate sensitive server names and IPs for screenshots.
 - pings each server and shows latency (ms).
-- connects via SSH to collect: Server Type, OS, Kernel, uptime, load, CPU, RAM, disk, network usage, top processes, users, updates, service status, and Nginx configuration details.
+- connects via SSH to collect: Server Type, OS, Kernel, hostname, uptime, load, CPU, RAM, disk, network usage, top processes, users, updates, service status, and Nginx configuration details.
 - Automatically creates a daily cron job on remote hosts to check for updates.
 - Displays usage bars and threshold-based colors (green/yellow/red) for key metrics.
 - Caches results for 10 minutes (override via CACHE_TTL).
@@ -53,6 +54,7 @@ import re
 from functools import wraps
 from typing import Union, Tuple
 import urllib.request
+import shutil
 
 # Lazy load flask and webserver components only when needed
 try:
@@ -66,6 +68,8 @@ except ImportError:
 
 
 # --- Main Configuration ---
+SD_VERSION = "1.0b4"
+
 def load_env_file():
     env = {}
     env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
@@ -86,7 +90,7 @@ ENV_CONFIG = load_env_file()
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 SERVERS_FILE = os.path.join(APP_DIR, 'servers.json')
-SSH_KEY_PATH = ENV_CONFIG.get('SSH_KEY_PATH', os.environ.get('SSH_KEY_PATH', '/root/.ssh/id_ed25519'))
+SSH_KEY_PATH = ENV_CONFIG.get('SSH_KEY_PATH', os.environ.get('SSH_KEY_PATH', '/opt/server-dashboard/dashboard'))
 CACHE_TTL = int(ENV_CONFIG.get('CACHE_TTL', os.environ.get('CACHE_TTL', '300')))
 SSH_CONNECT_TIMEOUT = 5
 PING_COUNT = 1
@@ -122,15 +126,15 @@ if FLASK_AVAILABLE:
         @wraps(func)
         def decorated_view(*args, **kwargs):
             use_token_auth = SECRET_TOKEN and SECRET_TOKEN != "token"
-            
+
             # 1. Check for token auth
             if use_token_auth and request.args.get('auth') == SECRET_TOKEN:
                 return func(*args, **kwargs)
-            
-            # 2. Check for demo mode
+
+            # 2. Check for demo mode, but only after being authenticated
             if 'demo' in request.args:
                 return func(*args, **kwargs)
-                
+
             # 3. Check if any user/pass auth is configured
             if not users:
                 # No users configured, check if token auth is also disabled
@@ -139,19 +143,23 @@ if FLASK_AVAILABLE:
                 else:
                     # Token auth is the ONLY method, but no valid token was provided.
                     return ('Unauthorized: Access requires a valid token.', 403)
-            
+
             # 4. Fall back to standard HTTP Basic Auth
             return auth.login_required(func)(*args, **kwargs)
         return decorated_view
 # --------------------------
 
 
-def load_servers():
+def load_servers(check_for_example=False):
     try:
         with open(SERVERS_FILE, 'r') as f:
+            content = f.read()
+            # If requested, check if the file is the default example
+            if check_for_example and '"host": "171.22.1.1"' in content:
+                return 'IS_EXAMPLE'
             # Remove comments from JSON file before parsing
-            content = ''.join(line for line in f if not line.strip().startswith('//'))
-            return json.loads(content)
+            content_no_comments = ''.join(line for line in content.splitlines() if not line.strip().startswith('//'))
+            return json.loads(content_no_comments)
     except Exception:
         return []
 
@@ -226,6 +234,7 @@ def gather_server(host, user, port, country, name):
         'cpu_mhz': "cat /proc/cpuinfo | grep -m1 'cpu MHz' | cut -d ':' -f 2- | xargs | cut -d '.' -f 1",
         'os': 'lsb_release -ds || cat /etc/os-release | grep PRETTY_NAME | cut -d\'=\' -f2 | tr -d \'"\' || cat /etc/issue.net',
         'kernel': 'uname -r',
+        'hostname': 'hostname -f',
         'top_procs_cpu': "ps -eo pcpu,user,args --sort=-pcpu | sed 1d | grep -vF 'ps -eo pcpu,user,args' | grep -vE 'sshd:|sshd-session:' | head -n 5",
         'top_procs_mem': "ps -eo pmem,rss,user,args --sort=-pmem | sed 1d | grep -vF 'ps -eo pmem,rss,user,args' | grep -vE 'sshd:|sshd-session:' | head -n 5",
         'logged_in_users': "who | grep -E 'tty|pts' || true",
@@ -389,7 +398,7 @@ echo "NGINX_CONFIG_END";
         disk_free = int(disk_parts[1]) if len(disk_parts) >= 2 else None
         disk_used = (disk_total - disk_free) if disk_total is not None and disk_free is not None else None
         disk_usage_percent = round((disk_used / disk_total) * 100, 1) if disk_total and disk_total > 0 else 0
-        
+
         net_rx_mbits, net_tx_mbits = 0.0, 0.0
         net_stats_lines = results.get('net_stats', '').splitlines()
         if len(net_stats_lines) == 2:
@@ -403,7 +412,7 @@ echo "NGINX_CONFIG_END";
 
         virt_type_str = results.get('virt_type', '').strip()
         server_type = virt_type_str.capitalize() if virt_type_str else 'Physical'
-        
+
         upgradable_packages_str = results.get('updates_check', '0').strip()
         upgradable_packages = int(upgradable_packages_str) if upgradable_packages_str.isdigit() else 0
 
@@ -431,7 +440,7 @@ echo "NGINX_CONFIG_END";
                 parts = line.strip().split(':', 3)
                 if len(parts) >= 3:
                     service_status.append({'name': parts[0], 'port': parts[1], 'status': parts[2], 'info': parts[3] if len(parts) > 3 else ''})
-        
+
         nginx_config_raw = results.get('nginx_config', '')
         nginx_hosts = []
         nginx_proxies = []
@@ -453,12 +462,14 @@ echo "NGINX_CONFIG_END";
         kernel_version = results.get('kernel', '').strip()
         top_procs_cpu = results.get('top_procs_cpu', '').strip()
         logged_in_users = results.get('logged_in_users', '').strip()
+        hostname = results.get('hostname', '').strip()
+
 
     except Exception:
         mem_total = mem_free = mem_used = disk_total = disk_free = disk_used = None
         mem_usage_percent = disk_usage_percent = 0; net_rx_mbits = net_tx_mbits = 0.0; upgradable_packages = 0
         cores = 1; load_1m = 0; load_str = "0 0 0"
-        cpu_model = cpu_mhz = os_info = kernel_version = top_procs_cpu = top_procs_mem = logged_in_users = server_type = ''
+        cpu_model = cpu_mhz = os_info = kernel_version = top_procs_cpu = top_procs_mem = logged_in_users = server_type = hostname = ''
         service_status = []; nginx_hosts = []; nginx_proxies = []
 
     data['ssh'] = {
@@ -468,7 +479,7 @@ echo "NGINX_CONFIG_END";
         'net_rx_mbits': net_rx_mbits, 'net_tx_mbits': net_tx_mbits, 'server_type': server_type, 'upgradable_packages': upgradable_packages,
         'cpu_model': cpu_model, 'cpu_mhz': cpu_mhz, 'os_info': os_info, 'kernel_version': kernel_version,
         'top_procs_cpu': top_procs_cpu, 'top_procs_mem': top_procs_mem, 'logged_in_users': logged_in_users, 'service_status': service_status,
-        'nginx_hosts': nginx_hosts, 'nginx_proxies': nginx_proxies
+        'nginx_hosts': nginx_hosts, 'nginx_proxies': nginx_proxies, 'hostname': hostname
     }
     return data
 
@@ -479,11 +490,11 @@ def get_cached_or_fetch(server):
         entry = _cache.get(key)
         if entry and (time.time() - entry['ts'] < CACHE_TTL):
             return entry['data'], entry['ts']
-    
+
     # Get user and port from server dict with defaults
     user = server.get('user', 'root')
     port = server.get('port', 22)
-    
+
     data = gather_server(server['host'], user, port, server.get('country',''), server.get('name', server['host']))
     with _cache_lock:
         _cache[key] = {'ts': time.time(), 'data': data}
@@ -580,6 +591,9 @@ if FLASK_AVAILABLE:
           const c=document.createElement('div'); c.className='card';
           const pingMetric = s.ping_ok ? `PING OK ${s.ping_ms ? '(' + s.ping_ms.toFixed(1) + ' ms)' : ''}` : 'NO PING';
           let html=`<div class="row"><div><span class="flag">${s.flag||''}</span><strong>${s.name}</strong> <span class="small">${s.host}</span></div><div class="small">${s.last_update?new Date(s.last_update*1000).toLocaleString():''}</div></div>`;
+          if(s.ssh && s.ssh.hostname) {
+            html+=`<div class=\"row\" style=\"margin-top:-4px; margin-bottom:8px;\"><div class=\"small\">${escapeHtml(s.ssh.hostname)}</div></div>`;
+          }
           html+=`<div class="row" style="margin-top:8px"><div class="small">Ping</div><div class="metric ${s.ping_ok? 'status-ok':'status-bad'}">${pingMetric}</div></div>`;
           if(s.ssh){
             const loadClass = getLoadClass(s.ssh.load_1m, s.ssh.cores);
@@ -612,7 +626,7 @@ if FLASK_AVAILABLE:
                 });
                 html+=`<div class="small" style="flex-basis: 100%;">Service Status<div class="service-status-list">${serviceHtml}</div></div>`;
             }
-            
+
             if (s.ssh.nginx_hosts && s.ssh.nginx_hosts.length > 0) {
                 let nginxHtml = '';
                 s.ssh.nginx_hosts.forEach(host => {
@@ -753,7 +767,7 @@ if FLASK_AVAILABLE:
                             domain = nginx_host['host'].strip()
                             parts = domain.split('.')
                             nginx_host['host'] = 'sub.example.com' if len(parts) > 2 else 'example.com'
-                    
+
                     # Sanitize Nginx proxies
                     if server['ssh'].get('nginx_proxies'):
                         path_segment_map = {}
@@ -763,7 +777,7 @@ if FLASK_AVAILABLE:
                             nonlocal demo_counter
                             if not path_str or path_str == '/':
                                 return path_str
-                            
+
                             segments = [s for s in path_str.split('/') if s]
                             new_segments = []
                             for segment in segments:
@@ -771,7 +785,7 @@ if FLASK_AVAILABLE:
                                     path_segment_map[segment] = f"demo{demo_counter}"
                                     demo_counter += 1
                                 new_segments.append(path_segment_map[segment])
-                            
+
                             new_path = "/".join(new_segments)
                             if path_str.startswith('/'):
                                 new_path = '/' + new_path
@@ -784,12 +798,12 @@ if FLASK_AVAILABLE:
                             path_parts = proxy['path'].split('/', 1)
                             path_domain_part = path_parts[0]
                             path_path_part = '/' + path_parts[1] if len(path_parts) > 1 else ''
-                            
+
                             sanitized_domain = 'example.com'
                             if '.' in path_domain_part:
                                 parts = path_domain_part.split('.')
                                 sanitized_domain = 'sub.example.com' if len(parts) > 2 else 'example.com'
-                            
+
                             # Sanitize path's path part
                             proxy['path'] = sanitized_domain + sanitize_path_segments(path_path_part)
 
@@ -798,7 +812,7 @@ if FLASK_AVAILABLE:
                             if target_match:
                                 protocol, domain_with_port, path = target_match.groups()
                                 domain_only = domain_with_port.split(':')[0]
-                                
+
                                 sanitized_domain = domain_with_port
                                 if '.' in domain_only and not re.match(r'\d{1,3}(\.\d{1,3}){3}', domain_only):
                                     parts = domain_only.split('.')
@@ -832,19 +846,19 @@ if FLASK_AVAILABLE:
             thread.join()
 
         return jsonify({'ok': True})
-        
+
 def start_server():
     if not FLASK_AVAILABLE:
         print("\nERROR: Flask or other required web modules are not installed.")
         print("Please run the master installer first or install them manually:")
         print("  sudo python3 server.py --install-master")
         sys.exit(1)
-    
+
     use_token_auth = SECRET_TOKEN and SECRET_TOKEN != "token"
 
     print('Using SSH key:', SSH_KEY_PATH)
     print('Servers file:', SERVERS_FILE)
-    
+
     if users:
         print(f"Password auth enabled. User: {PANEL_USER}, Pass: {PANEL_PASS}")
         if PANEL_USER == "user" and PANEL_PASS == "pass":
@@ -853,7 +867,7 @@ def start_server():
             print("  sudo python3 server.py --install-master\n")
     else:
         print("Password auth is disabled.")
-        
+
     if use_token_auth:
         if not users:
             print("Token-only auth is enabled.")
@@ -877,6 +891,12 @@ def print_help():
     print("--install-master    - Install required packages to run dashboard on this system, run config wizard for Binding/Users/etc, write example servers.json and generate SSH key if desired")
     print("--install-slaves    - Install required packages on slaves read from servers.json")
     print("--start             - Start Dashboard server")
+    print("--add-server        - Interactively add a new server to servers.json")
+    print("--path              - Show script and configuration directory path")
+    print("--cd                - Print the command to change to the script directory")
+    print("--config            - Show configuration file path")
+    print("-v / --version      - Show script version")
+
 
 def run_command(cmd, show_output=False):
     """Runs a command, returns True on success, False on failure."""
@@ -888,7 +908,7 @@ def run_command(cmd, show_output=False):
         return result.returncode == 0
     except Exception:
         return False
-        
+
 def install_package(pkg):
     """Installs an apt package and reports status."""
     print(f"- {pkg}: ", end="", flush=True)
@@ -896,7 +916,7 @@ def install_package(pkg):
     if run_command(f"dpkg -s {pkg} 2>/dev/null | grep -q 'Status: install ok installed'"):
         print("\033[92mAlready installed\033[0m")
         return True
-    
+
     # Try to install
     if run_command(f"sudo apt-get install -y -qq {pkg}"):
         print("\033[92mInstalled\033[0m")
@@ -906,14 +926,29 @@ def install_package(pkg):
         return False
 
 def run_master_installer():
+    install_dir = "/opt/server-dashboard"
+    script_name = "server-dashboard.py"
+    symlink_path = "/usr/local/bin/server-dashboard"
+    target_script_path = os.path.join(install_dir, script_name)
+
     if os.geteuid() != 0:
         print("Error: --install-master must be run with sudo.")
         sys.exit(1)
 
+    # Self-relocation logic
+    if APP_DIR != install_dir:
+        print(f"Installer is not in the target directory. Moving to {install_dir}...")
+        os.makedirs(install_dir, exist_ok=True)
+        shutil.copy(__file__, target_script_path)
+        print(f"Script copied. Re-running installer from {install_dir}...")
+        os.chdir(install_dir)
+        os.execvp("sudo", ["sudo", "python3", script_name, "--install-master"])
+        return # Should not be reached
+
     print("--Installing Core Dependencies--")
     run_command("sudo apt-get update -qq")
     # Removed 'python3' as it's required to run the script itself
-    core_deps = ['openssh-client', 'python3-venv', 'python3-pip']
+    core_deps = ['openssh-client', 'python3-venv', 'python3-pip', 'screen']
     for pkg in core_deps:
         if not install_package(pkg):
             print(f"\nFailed to install required package: {pkg}. Aborting.")
@@ -934,13 +969,9 @@ def run_master_installer():
         print("  pip install --upgrade pip")
         print("  pip install flask paramiko flask-httpauth waitress")
         sys.exit(1)
-    
-    print("\n--Packages Installed, Please configure venv after this installer finishes--")
-    print("  python3 -m venv venv")
-    print("  source venv/bin/activate")
-    print("  pip install --upgrade pip")
-    print("  pip install flask paramiko flask-httpauth waitress")
-    
+
+    print("\n--Python Modules OK--")
+
     print("\n\n")
 
     # Favicon Download
@@ -970,13 +1001,35 @@ def run_master_installer():
             with open(f"{default_key_name}.pub", 'r') as f:
                 pub_key = f.read().strip()
                 print(f"  - echo '{pub_key}' >> /root/.ssh/authorized_keys")
-    
+
     print("\n\n")
 
     # servers.json Generation
     if not os.path.exists(SERVERS_FILE):
-        print("--No server configuration detected - Writing example servers.json, Please edit manually--")
-        example_json = """// The only required fields are "name" and "host".
+        add_now_answer = input("--No server configuration detected. Do you want to add server(s) to the configuration now? [Y/n] ").lower().strip()
+        if add_now_answer == "" or add_now_answer == "y":
+            servers = []
+            while True:
+                new_server = prompt_for_server(servers)
+                servers.append(new_server)
+
+                another = input("Add another server? [y/N]: ").lower().strip()
+                if another != 'y':
+                    break
+
+            with open(SERVERS_FILE, 'w') as f:
+                json.dump(servers, f, indent=2)
+            print(f"\nServer configuration saved to {SERVERS_FILE}.")
+
+#            setup_now = input("Do you want to set these servers up now? (SSH password or keyless access required) [y/N]: ").lower().strip()
+#            if setup_now == 'y':
+#                run_slave_installer()
+#            else:
+            print("\nServers still need to be set up, run with '--install-slaves' later to start the process.")
+
+        else:
+            print("Writing example servers.json, Please edit manually.")
+            example_json = """// The only required fields are "name" and "host".
 // If not provided, "user" defaults to "root" and "port" defaults to 22.
 // The "country" field for the flag is optional.
 [
@@ -1000,10 +1053,10 @@ def run_master_installer():
     "country": "NL"
   }
 ]"""
-        with open(SERVERS_FILE, 'w') as f:
-            f.write(example_json)
-        print("Content:")
-        print(example_json)
+            with open(SERVERS_FILE, 'w') as f:
+                f.write(example_json)
+            print("Content:")
+            print(example_json)
 
     print("\n\n")
 
@@ -1025,8 +1078,54 @@ def run_master_installer():
         f.write(f"SECRET_TOKEN={secret_token}\n")
         f.write(f"CACHE_TTL={cache_ttl}\n")
         f.write(f"SSH_KEY_PATH={new_ssh_path}\n")
-    
-    print("\nConfiguration saved to .env file. You can now start the server with '--start'")
+
+    # Systemd service creation
+    systemd_answer = input("\n--Create a systemd service to run the dashboard on boot? [Y/n] ").lower().strip()
+    if systemd_answer == "" or systemd_answer == "y":
+        service_content = f"""
+[Unit]
+Description=server-dashboard in screen
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+WorkingDirectory={install_dir}
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/screen -dm -S server_status bash -lc 'exec python3 {script_name} --start'
+ExecStop=/usr/bin/screen -S server_status -X quit
+
+[Install]
+WantedBy=multi-user.target
+"""
+        service_path = "/etc/systemd/system/server-dashboard.service"
+        try:
+            with open(service_path, "w") as f:
+                f.write(service_content)
+            run_command("systemctl daemon-reload")
+            run_command("systemctl enable server-dashboard")
+            print(f"\nSystemd service 'server-dashboard' created and enabled.")
+            print("You can manage it with:")
+            print("  sudo systemctl start|stop|restart server-dashboard")
+        except Exception as e:
+            print(f"\nFailed to create systemd service: {e}")
+
+    # Symlink creation
+    if not os.path.exists(symlink_path):
+        wrapper_script = f"""#!/bin/bash
+SPWD=$PWD
+cd {install_dir}
+python3 {target_script_path} "$@"
+cd $SPWD
+"""
+        with open(symlink_path, "w") as f:
+            f.write(wrapper_script)
+        os.chmod(symlink_path, 0o755)
+        print(f"\nSymlink created at {symlink_path}.")
+        print("You can now run 'server-dashboard' from anywhere.")
+
+    print(f"\nInstallation complete. All files are located in {install_dir}.")
     sys.exit(0)
 
 
@@ -1034,12 +1133,12 @@ def run_slave_installer():
     if os.geteuid() != 0:
         print("Error: --install-slaves must be run with sudo.")
         sys.exit(1)
-        
+
     servers = load_servers()
     if not servers:
         print("--No servers configured in servers.json or file does not exist--")
         sys.exit(1)
-        
+
     print("--Servers loaded from config--")
 
     for server in servers:
@@ -1047,14 +1146,14 @@ def run_slave_installer():
         user = server.get('user', 'root')
         port = server.get('port', 22)
         name = server['name']
-        
+
         print(f"\n{name} {host} - ", end="", flush=True)
 
         try:
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             client.connect(hostname=host, port=port, username=user, key_filename=SSH_KEY_PATH, timeout=SSH_CONNECT_TIMEOUT)
-            
+
             # Check for marker file
             sftp = client.open_sftp()
             try:
@@ -1068,25 +1167,25 @@ def run_slave_installer():
             sftp.close()
 
             print("Installing packages:")
-            
+
             # Install packages one by one
             stdin, stdout, stderr = client.exec_command("apt-get update -qq")
             stdout.channel.recv_exit_status() # Wait for command to finish
-            
+
             slave_deps = ['virt-what', 'net-tools', 'netcat-openbsd', 'openssl', 'mysql-client', 'mariadb-client-compat']
             failed_packages = []
-            
+
             for pkg in slave_deps:
                 # Check if already installed
                 stdin, stdout, stderr = client.exec_command(f"dpkg -s {pkg} 2>/dev/null | grep -q 'Status: install ok installed'")
                 if stdout.channel.recv_exit_status() == 0:
                     print(f"- {pkg}: Already installed")
                     continue
-                
+
                 # Install
                 stdin, stdout, stderr = client.exec_command(f"apt-get install -y -qq {pkg}")
                 exit_status = stdout.channel.recv_exit_status()
-                
+
                 if exit_status == 0:
                     print(f"- {pkg}: Installed")
                 else:
@@ -1110,17 +1209,92 @@ def run_slave_installer():
                 print(f"{name} {host} - Failure with one or more packages")
 
             client.close()
-            
+
         except Exception as e:
             print(f"Skipping: Connection failed ({e})")
 
     print("\n\n--All slaves installed, check above for errors and repair as needed--")
     sys.exit(0)
 
+def run_add_server():
+    """Interactive wizard to add a new server to servers.json."""
+    if not os.path.exists(SERVERS_FILE):
+        servers = []
+    else:
+        servers = load_servers(check_for_example=True)
+        if servers == 'IS_EXAMPLE':
+            print("Example servers.json found. It will be overwritten.")
+            servers = []
+
+    new_server = prompt_for_server(servers)
+    if new_server is None:
+        sys.exit(1)
+
+    servers.append(new_server)
+
+    try:
+        with open(SERVERS_FILE, 'w') as f:
+            json.dump(servers, f, indent=2)
+        print(f"\nSuccessfully added '{new_server['name']}' to {SERVERS_FILE}.")
+    except Exception as e:
+        print(f"\nError writing to {SERVERS_FILE}: {e}")
+        sys.exit(1)
+    print("\nPlease run --install-slaves or manually install the packages to set the new server up after copying ssh key.")
+    install_now = input("Do you want to run --install-slaves now to set this server up? [y/N]: ").lower().strip()
+    if install_now == 'y':
+        run_slave_installer()
+    else:
+        script_name = "server-dashboard" if os.path.exists("/usr/local/bin/server-dashboard") else os.path.basename(__file__)
+        print(f"\nPlease run 'sudo {script_name} --install-slaves' at your convenience.")
+    sys.exit(0)
+
+def prompt_for_server(existing_servers):
+    """Helper function to prompt for server details."""
+    print("\n--Adding a New Server--")
+    print("Required: Name, Host. Press Enter for defaults on others.")
+
+    while True:
+        name = input("Name: ").strip()
+        if name: break
+        print("Name is a required field.")
+
+    while True:
+        host = input("Host (IP or FQDN): ").strip()
+        if host: break
+        print("Host is a required field.")
+
+    for server in existing_servers:
+        if server.get('name') == name:
+            print(f"\nError: A server with the name '{name}' already exists. Please try again.")
+            return None
+        if server.get('host') == host:
+            print(f"\nError: A server with the host '{host}' already exists. Please try again.")
+            return None
+
+    user = input("SSH User (default: root): ").strip() or "root"
+    sshkey = f"{SSH_KEY_PATH}.pub"
+    port_str = input("SSH Port (default: 22): ").strip()
+    port = int(port_str) if port_str.isdigit() else 22
+    country = input("Country Code (2 letters, for flag, e.g., US): ").strip().upper()
+
+    new_server = {"name": name, "host": host}
+    if user != 'root': new_server['user'] = user
+    if port != 22: new_server['port'] = port
+    if country: new_server['country'] = country
+
+    import subprocess
+
+    cmd = f"/usr/bin/ssh-copy-id -f -p {port} -i {sshkey} {user}@{host}"
+    print(f"\nRunning: {cmd}\n")
+    subprocess.run(cmd, shell=True)
+    return new_server
+
 
 if __name__ == '__main__':
     if len(sys.argv) == 1 or sys.argv[1] in ['-h', '--help']:
         print_help()
+    elif sys.argv[1] == '--add-server':
+        run_add_server()
     elif sys.argv[1] == '--install-master':
         run_master_installer()
     elif sys.argv[1] == '--install-slaves':
@@ -1130,6 +1304,19 @@ if __name__ == '__main__':
         run_slave_installer()
     elif sys.argv[1] == '--start':
         start_server()
+    elif sys.argv[1] == '--path':
+        print("/opt/server-dashboard")
+    elif sys.argv[1] == '--cd':
+        print("cd /opt/server-dashboard")
+    elif sys.argv[1] == '--config':
+        env_path = os.path.join(APP_DIR, '.env')
+        if os.path.exists(env_path):
+            print(env_path)
+        else:
+            print("No .env file used - Configuration is in script itself:")
+            print(os.path.abspath(__file__))
+    elif sys.argv[1] in ['-v', '--version']:
+        print(f"Version {SD_VERSION} - https://github.com/i-william-hr/ServerDashboard/")
     else:
         print(f"Unknown option: {sys.argv[1]}")
         print_help()
