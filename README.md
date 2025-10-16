@@ -77,6 +77,21 @@ Then follow the steps:
 
 ---
 
+## ➕ Add Servers Interactively
+
+You can now add servers easily using the new `--add-server` option:
+
+```bash
+python3 server_status.py --add-server
+```
+
+This interactive command:
+- Prompts you for the server name, IP/hostname, SSH user, and country code. Only name and IP/hostname are mandatory if SSH runs on port 22.
+- Adds the new entry automatically to your `servers.json`.
+- Optionally offers to **copy your public SSH key** to the new server for passwordless access.
+
+---
+
 ## ▶️ Startup
 
 Run the server (ideally inside `screen` or `tmux`):
@@ -124,6 +139,6 @@ If token authentication is enabled, the token will appear directly in the URL.
 ### 🧩 Notes
 
 - Designed for Debian/Ubuntu systems.
-- Master ideally should be Ubuntu 24 or Debian 12+
+- Master ideally should be Ubuntu 24 or Debian 12+.
 - Works with any SSH-accessible Linux host.
 - Minimal dependencies and no agents required.
