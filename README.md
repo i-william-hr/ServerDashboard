@@ -13,7 +13,9 @@ Tested as root in screen but should work with any user if bind port is above 102
 
 Do not forget:
 
-- Install packages on each slave: apt update && apt install -y virt-what; apt install -y net-tools; apt install -y netcat-openbsd; apt install -y mysql-client; apt install -y mariadb-client-compat
+- Install packages on master: apt update && apt install -y python3 python3-venv python3-pip openssh-client
+
+- Install packages on each slave: apt update && apt install -y virt-what; apt install -y net-tools; apt install -y netcat-openbsd; apt install -y mysql-client; apt install -y mariadb-client-compat; apt install -y openssl
 
 - Change bind from 127.0.0.1 to 0.0.0.0 at the Py end if no reverse proxy is used, Change port as desired
 
@@ -38,4 +40,8 @@ This monitors/Shows:
 - Various Services, with automatic detection of ports they run on (and check for socket for MySQL):
 
 - Nginx - MySQL/MariaDB - ZNC - SSH - Python scripts like my AppleHealthDashboard
+
+- Shows all configured domains on Nginx, their ports and if SSL if trhe cert is valid
+
+- Shows all Nginx reverse proxies and their targets
 
