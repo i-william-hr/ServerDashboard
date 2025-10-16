@@ -22,13 +22,13 @@ python3 server_status.py --install-master
 
 Then follow the steps:
 
-1. Copy your SSH key to all slave servers manually (as prompted).
-2. Add slaves to `servers.json`.
-3. Run:
+1. See section "Add Servers Interactively" below to add servers to the servers.json interactively
+1.1 If you want to manually add slaves instead edit `servers.json`.
+2. Run:
    ```bash
    python3 server_status.py --install-slaves
    ```
-4. Adjust the `.env` file if necessary.  
+3. Adjust the `.env` file if necessary.  
    No manual script edits are required.
 
 > If **no user/password** or **token** is set in `.env` or environment variables, **public access** will be enabled.
@@ -112,7 +112,10 @@ If token authentication is enabled, the token will appear directly in the URL.
 ## 📊 Features
 
 **System Overview**
+- Name
+- IPv4
 - Ping latency
+- Full Hostname
 - Uptime
 - Load average (with color-coded status)
 - Host type (VM/Dedicated + VM type)
