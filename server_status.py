@@ -5,8 +5,9 @@ What it does
 - Runs on the Waitress production WSGI server.
 - Binds to 127.0.0.1 so it's only accessible via a reverse proxy like Nginx.
 - Protects the web UI with two methods:
-  1. HTTP Basic Authentication (user: wm, pass: wm).
+  1. HTTP Basic Authentication (user: user, pass: pass).
   2. A secret token in the URL (e.g., ?auth=YOUR_TOKEN) for easy access from bookmarks.
+- Includes a demo mode (?demo) to obfuscate sensitive server names and IPs for screenshots.
 - pings each server and shows latency (ms).
 - connects via SSH to collect: Server Type, OS, Kernel, uptime, load, CPU, RAM, disk, network usage, top processes, users, updates, service status, and Nginx configuration details.
 - Automatically creates a daily cron job on remote hosts to check for updates.
@@ -31,10 +32,11 @@ Run:
   python3 server.py  # listens on 127.0.0.1:8889
 
 Env vars:
-  SECRET_TOKEN (default TOKEN)
+  SECRET_TOKEN (default token)
   SSH_KEY_PATH (default /root/.ssh/id_ed25519)
   CACHE_TTL (default 300)
-  FLASK_RUN_HOST / FLASK_RUN_PORT (defaults 127.0.0.1 / 8889)
+  BIND_HOST (default 127.0.0.1)
+  BIND_PORT (default 8889)
 
 """
 
@@ -51,13 +53,16 @@ import threading
 import re
 
 
+# --- Main Configuration ---
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 SERVERS_FILE = os.path.join(APP_DIR, 'servers.json')
 SSH_KEY_PATH = os.environ.get('SSH_KEY_PATH', '/root/.ssh/id_ed25519')
 CACHE_TTL = int(os.environ.get('CACHE_TTL', '300'))
 SSH_CONNECT_TIMEOUT = 5
 PING_COUNT = 1
-SECRET_TOKEN = os.environ.get('SECRET_TOKEN', 'TOKEN')
+SECRET_TOKEN = os.environ.get('SECRET_TOKEN', 'token')
+BIND_HOST = os.environ.get('BIND_HOST', '127.0.0.1')
+BIND_PORT = int(os.environ.get('BIND_PORT', '8889'))
 
 
 _cache = {}
@@ -82,6 +87,8 @@ def combined_auth_required(func):
     @wraps(func)
     def decorated_view(*args, **kwargs):
         if SECRET_TOKEN and request.args.get('auth') == SECRET_TOKEN:
+            return func(*args, **kwargs)
+        if 'demo' in request.args: # Allow demo mode without auth
             return func(*args, **kwargs)
         return auth.login_required(func)(*args, **kwargs)
     return decorated_view
@@ -473,6 +480,7 @@ body{background:linear-gradient(180deg,#050607 0%, #0b0f14 100%);color:#e6eef6;f
 <script>
 const urlParams = new URLSearchParams(window.location.search);
 const authToken = urlParams.get('auth');
+const isDemo = urlParams.has('demo');
 
 function getUsageClass(p){
   if(p === null || isNaN(p)) return '';
@@ -489,11 +497,19 @@ function getLoadClass(load, cores){
   return 'status-ok';
 }
 
+function buildUrl(path) {
+    const params = new URLSearchParams();
+    if (isDemo) params.append('demo', '');
+    if (authToken) params.append('auth', authToken);
+    const queryString = params.toString();
+    return queryString ? `${path}?${queryString}` : path;
+}
+
 async function loadStatus(){
   const el=document.getElementById('grid');
   el.innerHTML='<div style="color:var(--muted)">Loading…</div>';
   try{
-    const fetchUrl = authToken ? `status.json?auth=${authToken}` : 'status.json';
+    const fetchUrl = buildUrl('status.json');
     const r = await fetch(fetchUrl);
     if(!r.ok) {
         if(r.status === 404) throw new Error('Not Found (check proxy path)');
@@ -547,7 +563,7 @@ async function loadStatus(){
                 } else if (host.ssl_status !== 'NO_SSL') {
                     sslText = ` <span class="status-bad">SSL (${escapeHtml(host.ssl_status)})</span>`;
                 }
-                nginxHtml += `<div><strong>Host:</strong> ${escapeHtml(host.host)} ${escapeHtml(host.details)}${sslText}</div>`;
+                nginxHtml += `<div><strong>Host:</strong> ${escapeHtml(host.host)}${escapeHtml(host.details)}${sslText}</div>`;
             });
             s.ssh.nginx_proxies.forEach(proxy => {
                 nginxHtml += `<div><strong>Proxy:</strong> ${escapeHtml(proxy.path)} -&gt; ${escapeHtml(proxy.target)}</div>`;
@@ -589,7 +605,7 @@ function escapeHtml(s){ if(!s) return ''; return String(s).replace(/[&<>"']/g, f
 
 document.getElementById('refreshBtn').addEventListener('click', async()=>{
   if(!confirm('Purge cache and reload data?')) return;
-  const refreshUrl = authToken ? `refresh?auth=${authToken}` : 'refresh';
+  const refreshUrl = buildUrl('refresh');
   const r=await fetch(refreshUrl, {method:'POST'});
   if(r.ok) {
     countdown = 0; // Trigger immediate refresh and reset timer
@@ -648,6 +664,7 @@ def favicon_png():
 @app.route('/status.json')
 @combined_auth_required
 def status_json():
+    is_demo = 'demo' in request.args
     servers = load_servers()
     out = []
     threads = []
@@ -663,6 +680,39 @@ def status_json():
 
     for thread in threads:
         thread.join()
+
+    # Apply demo mode transformations if requested
+    if is_demo:
+        for i, server in enumerate(out):
+            server['name'] = f'Server-{i + 1}'
+            server['host'] = 'x.x.x.x'
+
+            if server.get('ssh'):
+                # Sanitize Nginx hosts
+                if server['ssh'].get('nginx_hosts'):
+                    for nginx_host in server['ssh']['nginx_hosts']:
+                        domain = nginx_host['host'].strip()
+                        parts = domain.split('.')
+                        nginx_host['host'] = 'sub.example.com' if len(parts) > 2 else 'example.com'
+                
+                # Sanitize Nginx proxies
+                if server['ssh'].get('nginx_proxies'):
+                    for proxy in server['ssh']['nginx_proxies']:
+                        # Sanitize path
+                        path_domain_part = proxy['path'].split('/')[0]
+                        if '.' in path_domain_part:
+                            parts = path_domain_part.split('.')
+                            sanitized_domain = 'sub.example.com' if len(parts) > 2 else 'example.com'
+                            proxy['path'] = proxy['path'].replace(path_domain_part, sanitized_domain)
+                        
+                        # Sanitize target
+                        match = re.search(r'(https?://)([^/:]+)', proxy['target'])
+                        if match:
+                            target_domain = match.group(2)
+                            if '.' in target_domain:
+                                parts = target_domain.split('.')
+                                sanitized_domain = 'sub.example.com' if len(parts) > 2 else 'example.com'
+                                proxy['target'] = proxy['target'].replace(target_domain, sanitized_domain)
 
     out.sort(key=lambda x: x.get('name',''))
     return jsonify(out)
@@ -690,11 +740,9 @@ def refresh():
     return jsonify({'ok': True})
 
 if __name__ == '__main__':
-    host = os.environ.get('FLASK_RUN_HOST', '127.0.0.1')
-    port = int(os.environ.get('FLASK_RUN_PORT', '8889'))
     print('Using SSH key:', SSH_KEY_PATH)
     print('Servers file:', SERVERS_FILE)
     if SECRET_TOKEN:
         print(f'URL auth enabled. Token: {SECRET_TOKEN}')
-    print(f'Starting Waitress server, listening on http://{host}:{port}')
-    serve(app, host=host, port=port)
+    print(f'Starting Waitress server, listening on http://{BIND_HOST}:{BIND_PORT}')
+    serve(app, host=BIND_HOST, port=BIND_PORT)
