@@ -40,7 +40,11 @@ Install packages on slaves: apt update && apt install -y virt-what; apt install 
 
 Info: Install of either mysql-client or mariadb-client-compat will fail dependig on OS/Version, this is fine as they work the same
 
-Set a TOKEN and/or User and Password (If no token is set token auth is disabled)
+OPTION 1: Create an .env file in the script directory
+
+OPTION 2: Set ENV vars as described in the script
+
+OPTION 3: Set binding, port, TOKEN and/or User and Password (If no token is set token auth is disabled) etc. inside the script
 
 Generate ssh key on master (ssh-keygen), copy public key to slaves and set path for private key in Py (Default path set is for "ssh-keygen" without arguments as root on Debian and Ubuntu)
 
