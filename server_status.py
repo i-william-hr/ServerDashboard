@@ -38,6 +38,11 @@ Env vars:
   BIND_HOST (default 127.0.0.1)
   BIND_PORT (default 8889)
 
+servers.json format:
+  The only required fields are "name" and "host".
+  If not provided, "user" defaults to "root" and "port" defaults to 22.
+  The "country" field for the flag is optional.
+
 """
 
 from flask import Flask, jsonify, request, render_template_string, send_from_directory
@@ -98,7 +103,9 @@ def combined_auth_required(func):
 def load_servers():
     try:
         with open(SERVERS_FILE, 'r') as f:
-            return json.load(f)
+            # Remove comments from JSON file before parsing
+            content = ''.join(line for line in f if not line.strip().startswith('//'))
+            return json.loads(content)
     except Exception:
         return []
 
@@ -130,11 +137,11 @@ def ping_host(host: str) -> tuple[bool, float | None]:
         return False, None
 
 
-def ssh_run_command(host, user, key_path, cmd):
+def ssh_run_command(host, user, port, key_path, cmd):
     try:
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(hostname=host, username=user, key_filename=key_path, timeout=SSH_CONNECT_TIMEOUT)
+        client.connect(hostname=host, port=port, username=user, key_filename=key_path, timeout=SSH_CONNECT_TIMEOUT)
         stdin, stdout, stderr = client.exec_command(cmd, timeout=30) # Increased timeout for service/nginx checks
         out = stdout.read().decode('utf-8', errors='ignore')
         err = stderr.read().decode('utf-8', errors='ignore')
@@ -146,7 +153,7 @@ def ssh_run_command(host, user, key_path, cmd):
         return False, str(e)
 
 
-def gather_server(host, user, country, name):
+def gather_server(host, user, port, country, name):
     now = time.time()
     ping_ok, ping_ms = ping_host(host)
     data = {
@@ -312,7 +319,7 @@ echo "NGINX_CONFIG_END";
 
     results = {}
     for k, cmd in cmds.items():
-        ok, out = ssh_run_command(host, user, SSH_KEY_PATH, cmd)
+        ok, out = ssh_run_command(host, user, port, SSH_KEY_PATH, cmd)
         if not ok:
             data['error'] = f'SSH cmd failed: {out}'
             return data
@@ -426,7 +433,12 @@ def get_cached_or_fetch(server):
         entry = _cache.get(key)
         if entry and (time.time() - entry['ts'] < CACHE_TTL):
             return entry['data'], entry['ts']
-    data = gather_server(server['host'], server.get('user','root'), server.get('country',''), server.get('name', server['host']))
+    
+    # Get user and port from server dict with defaults
+    user = server.get('user', 'root')
+    port = server.get('port', 22)
+    
+    data = gather_server(server['host'], user, port, server.get('country',''), server.get('name', server['host']))
     with _cache_lock:
         _cache[key] = {'ts': time.time(), 'data': data}
     return data, _cache[key]['ts']
