@@ -1,74 +1,129 @@
-# ServerDashboard
+# 🖥️ ServerDashboard
 
+### Simple Web Interface to Monitor Your Linux Servers via SSH
 
+ServerDashboard is a lightweight Python web app that provides a clean and mobile-friendly interface to monitor Linux servers and their services — using only SSH and a few basic system packages.  
 
-- Description:
+- Data updates automatically every **300 seconds** (via SSH).  
+- The web interface refreshes every **120 seconds**.  
+- Designed for both **desktop** and **mobile** (iPhone / Android with high-resolution screens).  
+- Tested as `root` in `screen`, but can run (not install) under any user with access to SSH keys and ports >1024.  
 
-This is a python app that provides a nice simple webinterface to monitor linux servers and services, using only SSH and few apt packages on targets.
+---
 
-The data is updated every 300 seconds by SSH from each host and the interface refreshes all 120 seconds.
+## ⚙️ Automatic Installation (Recommended)
 
-A mobile interface designed for iPhone and Android with relatively high resolution screen is included, see DEMO pictures.
+Run this on your master node:
 
-Tested as root in screen but should work with any user if bind port is above 1024 and the SSH key is accesible to it
+```bash
+wget https://raw.githubusercontent.com/i-william-hr/ServerDashboard/refs/heads/main/server_status.py
+python3 server_status.py --install-master
+```
 
+Then follow the steps:
 
+1. Copy your SSH key to all slave servers manually (as prompted).
+2. Add slaves to `servers.json`.
+3. Run:
+   ```bash
+   python3 server_status.py --install-slaves
+   ```
+4. Adjust the `.env` file if necessary.  
+   No manual script edits are required.
 
+> If **no user/password** or **token** is set in `.env` or environment variables, **public access** will be enabled.
 
-- Automatic install with config wizard:
+---
 
-run "python3 server_status.py --install-master"
+## 🛠️ Manual Installation
 
-Copy SSH key to slaves as instructed
+1. **Clone the repository**  
+   Copy this repo or just the `.py` and `.json` files.
 
-Add slaves to servers.json
+2. **Master requirements**  
+   ```bash
+   apt update && apt install -y python3-venv python3-pip openssh-client    python3-paramiko python3-flask-httpauth python3-waitress
+   ```
+   If some Python packages fail to install globally, create a virtual environment (see comments in the `.py` file).
 
-run "python3 server_status.py --install-master"
+3. **Slave requirements**  
+   ```bash
+   apt update
+   apt install -y virt-what net-tools netcat-openbsd openssl
+   apt install -y mysql-client || apt install -y mariadb-client-compat
+   ```
+   > One of the MySQL client packages may fail depending on distro — that’s expected.
 
-edit the ".env" file if needed, no changes/config in the script are required
+4. **Configuration options**  
+   Choose one of:
+   - **Option 1:** Use `.env` file (recommended).  
+   - **Option 2:** Use environment variables.  
+   - **Option 3:** Hardcode settings in the script.
 
+   Priority order: **ENV vars → `.env` → script defaults**
 
-- Manual installation:
+5. **SSH setup**  
+   Generate a key and deploy it to slaves:
+   ```bash
+   ssh-keygen
+   ```
+   Default private key path: `/root/.ssh/id_ed25519` (for `ssh-keygen` without args).
 
-See Py and Json file for config (Minimum PY: SSH key, User/Pass or Token - Minimum JSON: Name, IP/Host, SSH User, Country code)
+6. **Authentication behavior**
+   - If `.env` or ENV vars define `USER`/`PASSWORD`, password auth is used.
+   - If `SECRET_TOKEN` is set, **token-based auth** is used.
+   - If nothing is configured, dashboard defaults to **public access**.
+   - If no `.env` and no ENV vars exist, **hardcoded fallback credentials** apply.
 
-Install packages on master: apt update && apt install -y python3 python3-venv python3-pip openssh-client python3-paramiko python3-flask-httpauth python3-waitress
+---
 
-Create Python venv on master as per guide in Py file (might not be needed if all packages above are installed by apt, untested)
+## ▶️ Startup
 
-Install packages on slaves: apt update && apt install -y virt-what; apt install -y net-tools; apt install -y netcat-openbsd; apt install -y mysql-client; apt install -y mariadb-client-compat; apt install -y openssl
+Run the server (ideally inside `screen` or `tmux`):
 
-Info: Install of either mysql-client or mariadb-client-compat will fail dependig on OS/Version, this is fine as they work the same
+```bash
+python3 server_status.py --start
+```
 
-OPTION 1: Create an .env file in the script directory
+The app will display:
+- The dashboard URL  
+- The authentication method used (password or token)
 
-OPTION 2: Set ENV vars as described in the script
+If token authentication is enabled, the token will appear directly in the URL.
 
-OPTION 3: Set binding, port, TOKEN and/or User and Password (If no token is set token auth is disabled) etc. inside the script
+---
 
-Generate ssh key on master (ssh-keygen), copy public key to slaves and set path for private key in Py (Default path set is for "ssh-keygen" without arguments as root on Debian and Ubuntu)
+## 📊 Features
 
+**System Overview**
+- Ping latency
+- Uptime
+- Load average (with color-coded status)
+- Host type (VM/Dedicated + VM type)
+- Pending apt updates
+- Network In/Out traffic (Mbit)
+- OS version and kernel version
+- CPU model, cores, and frequency
+- Memory usage (with visual bar and color indicator)
+- Disk usage (with visual bar)
+- Top 5 processes by **CPU%** and **Memory% / MB**
+- Logged-in users with IP or terminal info
 
+**Service Monitoring**
+- Auto-detects running services and ports:
+  - Nginx  
+  - MySQL / MariaDB  
+  - ZNC  
+  - SSH  
+  - Python web apps (e.g. AppleHealthDashboard)
+- Displays all configured **Nginx domains**, ports, and **SSL validity**
+- Lists all **reverse proxies** and their backend targets
 
-This monitors/Shows:
+---
 
-- Ping - Uptime - Load (with Green/Yellow/Red marking) - Type (VM/Dedicated and what VM type) - Apt updates pending - Net In/Out (Mbit)
+### 🧩 Notes
 
-- OS Version - Kernel Version - CPU cores & Mhz
-
-- CPU Model - Memory Used/Free/Total (with usage bar in Green/Yellow/Red) - Disk Used/Free/Total (also with usage bar)
-
-- Top 5 processes by CPU (in %) and Memory (in % and in MB)
-
-- Logged in users with IP or terminal if local
-
--
-
-- Various Services, with automatic detection of ports they run on (and check for socket for MySQL):
-
-- Nginx - MySQL/MariaDB - ZNC - SSH - Python scripts like my AppleHealthDashboard
-
-- Shows all configured domains on Nginx, their ports and if SSL if trhe cert is valid
-
-- Shows all Nginx reverse proxies and their targets
-
+- Designed for Debian/Ubuntu systems.
+- Master ideally should be Ubuntu 24 or Debian 12+
+- Works with any SSH-accessible Linux host.
+- Minimal dependencies and no agents required.
