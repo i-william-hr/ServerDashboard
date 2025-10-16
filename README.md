@@ -17,7 +17,9 @@ Do not forget:
 
 - Install packages on each slave: apt update && apt install -y virt-what; apt install -y net-tools; apt install -y netcat-openbsd; apt install -y mysql-client; apt install -y mariadb-client-compat; apt install -y openssl
 
-- Change bind from 127.0.0.1 to 0.0.0.0 at the Py end if no reverse proxy is used, Change port as desired
+- Change bind from 127.0.0.1 to 0.0.0.0 in config if no reverse proxy is used, change port as desired
+
+- Set a TOKEN or User and Password
 
 - Generate ssh key on master (ssh-keygen), copy public key to slaves and set path for private key in Py (Default set is for ssh-keygen on Debian and Ubuntu)
 
