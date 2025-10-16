@@ -68,7 +68,7 @@ except ImportError:
 
 
 # --- Main Configuration ---
-SD_VERSION = "1.0b5"
+SD_VERSION = "1.0b6"
 
 def load_env_file():
     env = {}
@@ -115,6 +115,22 @@ if FLASK_AVAILABLE:
         users = {
             PANEL_USER: PANEL_PASS
         }
+
+    @app.after_request
+    def _secure_headers(resp):
+        resp.headers.setdefault('X-Frame-Options', 'DENY')
+        resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        resp.headers.setdefault('Referrer-Policy', 'no-referrer')
+        resp.headers.setdefault(
+        'Content-Security-Policy',
+        "default-src 'self'; "
+        "img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'"
+        )
+        resp.headers.setdefault('Cache-Control', 'no-store')
+        return resp
 
     @auth.verify_password
     def verify_password(username, password):
@@ -163,11 +179,6 @@ if FLASK_AVAILABLE:
 
             # Fallback (shouldn’t happen)
             return ('Unauthorized: authentication required.', 401)
-
-
-            # Fallback (shouldn’t happen)
-            return ('Unauthorized: authentication required.', 401)
-
 
         return decorated_view
 # --------------------------
@@ -228,6 +239,7 @@ def ssh_run_command(host, user, port, key_path, cmd):
         return True, out
     except Exception as e:
         return False, str(e)
+
 
 
 def gather_server(host, user, port, country, name):
@@ -591,11 +603,11 @@ if FLASK_AVAILABLE:
     }
 
     function buildUrl(path) {
-        const params = new URLSearchParams();
-        if (isDemo) params.append('demo', '');
-        if (authToken) params.append('auth', authToken);
-        const queryString = params.toString();
-        return queryString ? `${path}?${queryString}` : path;
+      // Resolve path relative to the current page (keeps /status/ prefix if present)
+      const u = new URL(path, window.location.href);
+      if (isDemo) u.searchParams.set('demo', '');
+      if (authToken) u.searchParams.set('auth', authToken);
+      return u.toString();
     }
 
     async function loadStatus(){
@@ -748,6 +760,15 @@ if FLASK_AVAILABLE:
     @combined_auth_required
     def index():
         return render_template_string(INDEX_HTML)
+
+    @app.route('/logout')
+    def logout():
+        from flask import make_response, request
+        # vary realm with a nonce so the browser forgets the previous one
+        realm = f"Server Dashboard {int(time.time())}"
+        resp = make_response('Logged out', 401)
+        resp.headers['WWW-Authenticate'] = f'Basic realm="{realm}"'
+        return resp
 
     @app.route('/favicon.ico')
     def favicon_ico():
@@ -920,7 +941,6 @@ def print_help():
     print("--cd                - Print the command to change to the script directory")
     print("--config            - Show configuration file path")
     print("-v / --version      - Show script version")
-
 
 
 def run_command(cmd, show_output=False):
@@ -1302,9 +1322,7 @@ def prompt_for_server(existing_servers):
     port = int(port_str) if port_str.isdigit() else 22
     country = input("Country Code (2 letters, for flag, e.g., US): ").strip().upper()
 
-    new_server = {"name"
-
-                        : name, "host": host}
+    new_server = {"name": name, "host": host}
     if user != 'root': new_server['user'] = user
     if port != 22: new_server['port'] = port
     if country: new_server['country'] = country
