@@ -7,28 +7,35 @@ ServerDashboard is a lightweight Python web app that provides a clean and mobile
 - Data updates automatically every **300 seconds** (via SSH).  
 - The web interface refreshes every **120 seconds**.  
 - Designed for both **desktop** and **mobile** (iPhone / Android with high-resolution screens).  
-- Tested as `root` in `screen`, but can run (not install) under any user with access to SSH keys and ports >1024.  
+- Tested as `root` in `screen`, but can run (not install) under any user with access to SSH keys and ports >1024.
+- Systemd startup script included for start on boot
 
 ---
 
 ## ⚙️ Automatic Installation (Recommended)
 
-Run this on your master node:
+Run this on your master node - This installs the panel to /opt, adds slaves if desired and can set up a system service at boot as well.
 
 ```bash
 wget https://raw.githubusercontent.com/i-william-hr/ServerDashboard/refs/heads/main/server_status.py
 python3 server_status.py --install-master
 ```
 
-Then follow the steps to add the slaves:
+Follow this steps to add slaves if not done inside the master installer or at later time:
 
 1. See section "Add Servers Interactively" below to add servers to the servers.json interactively
-1.1 If you want to manually add slaves instead edit `servers.json`.
-2. Run:
+   
+1. If you want to manually add slaves instead edit `servers.json`.
+3. Run:
    ```bash
-   python3 server_status.py --install-slaves
+   server_status --install-slaves
    ```
-3. Adjust the `.env` file if necessary.  
+
+Follow this steps to adjust the `.env` file if necessary (Port, User/Pass, Token...) (Optional, all set in Master installer)
+   ```bash
+   server_status --config
+   nano PATH
+   ```
    No manual script edits are required.
 
 > If **no user/password** or **token** is set in `.env` or environment variables, **public access** will be enabled.
@@ -74,6 +81,8 @@ Then follow the steps to add the slaves:
    - If `SECRET_TOKEN` is set, **token-based auth** is used.
    - If nothing is configured, dashboard defaults to **public access**.
    - If no `.env` and no ENV vars exist, **hardcoded fallback credentials** apply.
+  
+Mote that manual installation does not come with a systemd start script.
 
 ---
 
@@ -82,7 +91,7 @@ Then follow the steps to add the slaves:
 You can now add servers easily using the new `--add-server` option:
 
 ```bash
-python3 server_status.py --add-server
+server_status --add-server
 ```
 
 This interactive command:
@@ -91,7 +100,7 @@ This interactive command:
 - Optionally offers to **copy your public SSH key** to the new server (for this you need the root password or another local SSH key added).
 - Install required packages on slave:
    ```bash
-   python3 server_status.py --install-slaves
+   server_status --install-slaves
    ```
 - Restart to load the new server.
 
@@ -102,7 +111,7 @@ This interactive command:
 Run the server (ideally inside `screen` or `tmux`):
 
 ```bash
-python3 server_status.py --start
+server_status --start
 ```
 
 The app will display:
@@ -147,6 +156,7 @@ If token authentication is enabled, the token will appear directly in the URL.
 ### 🧩 Notes
 
 - Designed for Debian/Ubuntu systems.
+- Master tested o Ubuntu 24.04 LTS, Slaves Ubuntu 24.04 LTS and Debian 13.
 - Master ideally should be Ubuntu 24 or Debian 12+.
 - Works with any SSH-accessible Linux host.
 - Minimal dependencies and no agents required.
