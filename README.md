@@ -20,7 +20,7 @@ wget https://raw.githubusercontent.com/i-william-hr/ServerDashboard/refs/heads/m
 python3 server_status.py --install-master
 ```
 
-Then follow the steps:
+Then follow the steps to add the slaves:
 
 1. See section "Add Servers Interactively" below to add servers to the servers.json interactively
 1.1 If you want to manually add slaves instead edit `servers.json`.
@@ -89,6 +89,10 @@ This interactive command:
 - Prompts you for the server name, IP/hostname, SSH user, and country code. Only name and IP/hostname are mandatory if SSH runs on port 22.
 - Adds the new entry automatically to your `servers.json`.
 - Optionally offers to **copy your public SSH key** to the new server (for this you need the root password or another local SSH key added).
+- Install required packages on slave:
+   ```bash
+   python3 server_status.py --install-slaves
+   ```
 - Restart to load the new server.
 
 ---
