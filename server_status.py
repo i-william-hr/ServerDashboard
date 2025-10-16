@@ -52,6 +52,7 @@ import threading
 import re
 from functools import wraps
 from typing import Union, Tuple
+import urllib.request
 
 # Lazy load flask and webserver components only when needed
 try:
@@ -121,15 +122,15 @@ if FLASK_AVAILABLE:
         @wraps(func)
         def decorated_view(*args, **kwargs):
             use_token_auth = SECRET_TOKEN and SECRET_TOKEN != "token"
-
+            
             # 1. Check for token auth
             if use_token_auth and request.args.get('auth') == SECRET_TOKEN:
                 return func(*args, **kwargs)
-
+            
             # 2. Check for demo mode
             if 'demo' in request.args:
                 return func(*args, **kwargs)
-
+                
             # 3. Check if any user/pass auth is configured
             if not users:
                 # No users configured, check if token auth is also disabled
@@ -138,7 +139,7 @@ if FLASK_AVAILABLE:
                 else:
                     # Token auth is the ONLY method, but no valid token was provided.
                     return ('Unauthorized: Access requires a valid token.', 403)
-
+            
             # 4. Fall back to standard HTTP Basic Auth
             return auth.login_required(func)(*args, **kwargs)
         return decorated_view
@@ -388,7 +389,7 @@ echo "NGINX_CONFIG_END";
         disk_free = int(disk_parts[1]) if len(disk_parts) >= 2 else None
         disk_used = (disk_total - disk_free) if disk_total is not None and disk_free is not None else None
         disk_usage_percent = round((disk_used / disk_total) * 100, 1) if disk_total and disk_total > 0 else 0
-
+        
         net_rx_mbits, net_tx_mbits = 0.0, 0.0
         net_stats_lines = results.get('net_stats', '').splitlines()
         if len(net_stats_lines) == 2:
@@ -402,7 +403,7 @@ echo "NGINX_CONFIG_END";
 
         virt_type_str = results.get('virt_type', '').strip()
         server_type = virt_type_str.capitalize() if virt_type_str else 'Physical'
-
+        
         upgradable_packages_str = results.get('updates_check', '0').strip()
         upgradable_packages = int(upgradable_packages_str) if upgradable_packages_str.isdigit() else 0
 
@@ -430,7 +431,7 @@ echo "NGINX_CONFIG_END";
                 parts = line.strip().split(':', 3)
                 if len(parts) >= 3:
                     service_status.append({'name': parts[0], 'port': parts[1], 'status': parts[2], 'info': parts[3] if len(parts) > 3 else ''})
-
+        
         nginx_config_raw = results.get('nginx_config', '')
         nginx_hosts = []
         nginx_proxies = []
@@ -478,11 +479,11 @@ def get_cached_or_fetch(server):
         entry = _cache.get(key)
         if entry and (time.time() - entry['ts'] < CACHE_TTL):
             return entry['data'], entry['ts']
-
+    
     # Get user and port from server dict with defaults
     user = server.get('user', 'root')
     port = server.get('port', 22)
-
+    
     data = gather_server(server['host'], user, port, server.get('country',''), server.get('name', server['host']))
     with _cache_lock:
         _cache[key] = {'ts': time.time(), 'data': data}
@@ -611,7 +612,7 @@ if FLASK_AVAILABLE:
                 });
                 html+=`<div class="small" style="flex-basis: 100%;">Service Status<div class="service-status-list">${serviceHtml}</div></div>`;
             }
-
+            
             if (s.ssh.nginx_hosts && s.ssh.nginx_hosts.length > 0) {
                 let nginxHtml = '';
                 s.ssh.nginx_hosts.forEach(host => {
@@ -752,7 +753,7 @@ if FLASK_AVAILABLE:
                             domain = nginx_host['host'].strip()
                             parts = domain.split('.')
                             nginx_host['host'] = 'sub.example.com' if len(parts) > 2 else 'example.com'
-
+                    
                     # Sanitize Nginx proxies
                     if server['ssh'].get('nginx_proxies'):
                         path_segment_map = {}
@@ -762,7 +763,7 @@ if FLASK_AVAILABLE:
                             nonlocal demo_counter
                             if not path_str or path_str == '/':
                                 return path_str
-
+                            
                             segments = [s for s in path_str.split('/') if s]
                             new_segments = []
                             for segment in segments:
@@ -770,7 +771,7 @@ if FLASK_AVAILABLE:
                                     path_segment_map[segment] = f"demo{demo_counter}"
                                     demo_counter += 1
                                 new_segments.append(path_segment_map[segment])
-
+                            
                             new_path = "/".join(new_segments)
                             if path_str.startswith('/'):
                                 new_path = '/' + new_path
@@ -783,12 +784,12 @@ if FLASK_AVAILABLE:
                             path_parts = proxy['path'].split('/', 1)
                             path_domain_part = path_parts[0]
                             path_path_part = '/' + path_parts[1] if len(path_parts) > 1 else ''
-
+                            
                             sanitized_domain = 'example.com'
                             if '.' in path_domain_part:
                                 parts = path_domain_part.split('.')
                                 sanitized_domain = 'sub.example.com' if len(parts) > 2 else 'example.com'
-
+                            
                             # Sanitize path's path part
                             proxy['path'] = sanitized_domain + sanitize_path_segments(path_path_part)
 
@@ -797,7 +798,7 @@ if FLASK_AVAILABLE:
                             if target_match:
                                 protocol, domain_with_port, path = target_match.groups()
                                 domain_only = domain_with_port.split(':')[0]
-
+                                
                                 sanitized_domain = domain_with_port
                                 if '.' in domain_only and not re.match(r'\d{1,3}(\.\d{1,3}){3}', domain_only):
                                     parts = domain_only.split('.')
@@ -831,19 +832,19 @@ if FLASK_AVAILABLE:
             thread.join()
 
         return jsonify({'ok': True})
-
+        
 def start_server():
     if not FLASK_AVAILABLE:
         print("\nERROR: Flask or other required web modules are not installed.")
         print("Please run the master installer first or install them manually:")
         print("  sudo python3 server.py --install-master")
         sys.exit(1)
-
+    
     use_token_auth = SECRET_TOKEN and SECRET_TOKEN != "token"
 
     print('Using SSH key:', SSH_KEY_PATH)
     print('Servers file:', SERVERS_FILE)
-
+    
     if users:
         print(f"Password auth enabled. User: {PANEL_USER}, Pass: {PANEL_PASS}")
         if PANEL_USER == "user" and PANEL_PASS == "pass":
@@ -852,7 +853,7 @@ def start_server():
             print("  sudo python3 server.py --install-master\n")
     else:
         print("Password auth is disabled.")
-
+        
     if use_token_auth:
         if not users:
             print("Token-only auth is enabled.")
@@ -887,7 +888,7 @@ def run_command(cmd, show_output=False):
         return result.returncode == 0
     except Exception:
         return False
-
+        
 def install_package(pkg):
     """Installs an apt package and reports status."""
     print(f"- {pkg}: ", end="", flush=True)
@@ -895,7 +896,7 @@ def install_package(pkg):
     if run_command(f"dpkg -s {pkg} 2>/dev/null | grep -q 'Status: install ok installed'"):
         print("\033[92mAlready installed\033[0m")
         return True
-
+    
     # Try to install
     if run_command(f"sudo apt-get install -y -qq {pkg}"):
         print("\033[92mInstalled\033[0m")
@@ -933,13 +934,26 @@ def run_master_installer():
         print("  pip install --upgrade pip")
         print("  pip install flask paramiko flask-httpauth waitress")
         sys.exit(1)
-
+    
     print("\n--Packages Installed, Please configure venv after this installer finishes--")
     print("  python3 -m venv venv")
     print("  source venv/bin/activate")
     print("  pip install --upgrade pip")
     print("  pip install flask paramiko flask-httpauth waitress")
+    
+    print("\n\n")
 
+    # Favicon Download
+    favicon_path = os.path.join(APP_DIR, 'favicon.png')
+    if not os.path.exists(favicon_path):
+        print("--Downloading favicon.png--")
+        try:
+            url = "https://raw.githubusercontent.com/i-william-hr/ServerDashboard/refs/heads/main/favicon.png"
+            urllib.request.urlretrieve(url, favicon_path)
+            print("Favicon downloaded successfully.")
+        except Exception as e:
+            print(f"Could not download favicon: {e}")
+            print("Continuing without favicon.")
     print("\n\n")
 
     # SSH Key Generation
@@ -956,7 +970,7 @@ def run_master_installer():
             with open(f"{default_key_name}.pub", 'r') as f:
                 pub_key = f.read().strip()
                 print(f"  - echo '{pub_key}' >> /root/.ssh/authorized_keys")
-
+    
     print("\n\n")
 
     # servers.json Generation
@@ -1011,7 +1025,7 @@ def run_master_installer():
         f.write(f"SECRET_TOKEN={secret_token}\n")
         f.write(f"CACHE_TTL={cache_ttl}\n")
         f.write(f"SSH_KEY_PATH={new_ssh_path}\n")
-
+    
     print("\nConfiguration saved to .env file. You can now start the server with '--start'")
     sys.exit(0)
 
@@ -1020,12 +1034,12 @@ def run_slave_installer():
     if os.geteuid() != 0:
         print("Error: --install-slaves must be run with sudo.")
         sys.exit(1)
-
+        
     servers = load_servers()
     if not servers:
         print("--No servers configured in servers.json or file does not exist--")
         sys.exit(1)
-
+        
     print("--Servers loaded from config--")
 
     for server in servers:
@@ -1033,14 +1047,14 @@ def run_slave_installer():
         user = server.get('user', 'root')
         port = server.get('port', 22)
         name = server['name']
-
+        
         print(f"\n{name} {host} - ", end="", flush=True)
 
         try:
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             client.connect(hostname=host, port=port, username=user, key_filename=SSH_KEY_PATH, timeout=SSH_CONNECT_TIMEOUT)
-
+            
             # Check for marker file
             sftp = client.open_sftp()
             try:
@@ -1054,25 +1068,25 @@ def run_slave_installer():
             sftp.close()
 
             print("Installing packages:")
-
+            
             # Install packages one by one
             stdin, stdout, stderr = client.exec_command("apt-get update -qq")
             stdout.channel.recv_exit_status() # Wait for command to finish
-
+            
             slave_deps = ['virt-what', 'net-tools', 'netcat-openbsd', 'openssl', 'mysql-client', 'mariadb-client-compat']
             failed_packages = []
-
+            
             for pkg in slave_deps:
                 # Check if already installed
                 stdin, stdout, stderr = client.exec_command(f"dpkg -s {pkg} 2>/dev/null | grep -q 'Status: install ok installed'")
                 if stdout.channel.recv_exit_status() == 0:
                     print(f"- {pkg}: Already installed")
                     continue
-
+                
                 # Install
                 stdin, stdout, stderr = client.exec_command(f"apt-get install -y -qq {pkg}")
                 exit_status = stdout.channel.recv_exit_status()
-
+                
                 if exit_status == 0:
                     print(f"- {pkg}: Installed")
                 else:
@@ -1096,7 +1110,7 @@ def run_slave_installer():
                 print(f"{name} {host} - Failure with one or more packages")
 
             client.close()
-
+            
         except Exception as e:
             print(f"Skipping: Connection failed ({e})")
 
