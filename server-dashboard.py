@@ -18,21 +18,27 @@ What it does
 - manual Purge/Refresh button.
 
 Install on the dashboard host (Debian/Ubuntu):
-  Use the built-in installer: "sudo python3 server.py --install-master"
+  Use the built-in installer: "sudo python3 server-dashboard.py --install-master"
   Alternatively, manually install:
-  sudo apt update && sudo apt install -y openssh-client python3 python3-venv python3-pip python3-paramiko python3-flask-httpauth python3-waitress
+   See README
 
 Install on ALL REMOTE servers:
-  Use the built-in installer: "sudo python3 server.py --install-slaves"
+  Use the built-in installer:
+   On master server installed via --install-master: "server-dashboard --install-slaves"
+   On master server manually set up: "sudo python3 server-dashboard.py --install-slaves"
   Alternatively, manually install:
-  sudo apt update && sudo apt install -y virt-what; sudo apt install -y net-tools; sudo apt install -y netcat-openbsd; sudo apt install -y openssl; sudo apt install -y mysql-client; sudo apt install -y mariadb-client-compat
-
+   See README
 Run:
-  python3 server.py --start
+  On master server installed via --install-master with systemd service:
+   service server-dashboard start
+  On master server installed via --install-master w/o systemd service:
+   server-dashboard --start
+  On master server manually set up:
+   python3 server-dashboard.py --start
 
 Env vars:
-  SECRET_TOKEN (default token)
-  SSH_KEY_PATH (default /root/.ssh/id_ed25519)
+  SECRET_TOKEN (default "token" which means disabled)
+  SSH_KEY_PATH (default /opt/server-dashboard/dashboard created at install)
   CACHE_TTL (default 300)
   BIND_HOST (default 0.0.0.0)
   BIND_PORT (default 8889)
@@ -241,7 +247,6 @@ def ssh_run_command(host, user, port, key_path, cmd):
         return False, str(e)
 
 
-
 def gather_server(host, user, port, country, name):
     now = time.time()
     ping_ok, ping_ms = ping_host(host)
@@ -397,6 +402,7 @@ echo "$parsed_data" | grep "^HOST|" | sort | while IFS='|' read -r type host por
                 if [ "$(date -d "$exp_date" +%s)" -gt "$(date +%s)" ]; then ssl_status="OK"; else ssl_status="Expired"; fi;
             else ssl_status="Invalid"; fi;
         else ssl_status="Not_Found"; fi;
+
     fi;
     echo "HOST:$host:$port_list:$ssl_status";
 done;
@@ -789,6 +795,7 @@ if FLASK_AVAILABLE:
         def fetch_and_append(server, output_list):
             data, _ = get_cached_or_fetch(server)
             output_list.append(data)
+
 
         for s in servers:
             thread = threading.Thread(target=fetch_and_append, args=(s, out))
