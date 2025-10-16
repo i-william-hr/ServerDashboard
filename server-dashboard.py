@@ -18,20 +18,17 @@ What it does
 - manual Purge/Refresh button.
 
 Install on the dashboard host (Debian/Ubuntu):
-  Use the built-in installer: "sudo python3 server-dashboard.py --install-master"
+  Use the built-in installer: "sudo python3 server.py --install-master"
   Alternatively, manually install:
   sudo apt update && sudo apt install -y openssh-client python3 python3-venv python3-pip python3-paramiko python3-flask-httpauth python3-waitress
 
 Install on ALL REMOTE servers:
-  Use the built-in installer: "sudo python3 server-dashboard.py --install-slaves"
+  Use the built-in installer: "sudo python3 server.py --install-slaves"
   Alternatively, manually install:
   sudo apt update && sudo apt install -y virt-what; sudo apt install -y net-tools; sudo apt install -y netcat-openbsd; sudo apt install -y openssl; sudo apt install -y mysql-client; sudo apt install -y mariadb-client-compat
 
-Run - CLI:
-  python3 server-dashboard.py --start
-
-Run - Service:
- service server_status start
+Run:
+  python3 server.py --start
 
 Env vars:
   SECRET_TOKEN (default token)
@@ -71,7 +68,7 @@ except ImportError:
 
 
 # --- Main Configuration ---
-SD_VERSION = "1.0b4"
+SD_VERSION = "1.0b5"
 
 def load_env_file():
     env = {}
@@ -124,31 +121,54 @@ if FLASK_AVAILABLE:
         if username in users and users.get(username) == password:
             return username
 
+
     def combined_auth_required(func):
-        """Custom decorator to allow URL token OR Basic Auth."""
+        """Require either URL token or HTTP Basic. ?demo never bypasses auth."""
         @wraps(func)
         def decorated_view(*args, **kwargs):
-            use_token_auth = SECRET_TOKEN and SECRET_TOKEN != "token"
+            use_token_auth = bool(SECRET_TOKEN and SECRET_TOKEN not in ("token", "", None))
 
-            # 1. Check for token auth
+            # 1) Valid URL token passes
             if use_token_auth and request.args.get('auth') == SECRET_TOKEN:
                 return func(*args, **kwargs)
 
-            # 2. Check for demo mode, but only after being authenticated
-            if 'demo' in request.args:
+            # 2) HTTP Basic (manual) if PANEL_USER/PANEL_PASS set
+            if PANEL_USER and PANEL_PASS:
+                auth_header = request.headers.get('Authorization', '')
+                if auth_header.startswith('Basic '):
+                    import base64
+                    try:
+                        creds_b64 = auth_header.split(' ', 1)[1].strip()
+                        creds = base64.b64decode(creds_b64).decode('utf-8', errors='ignore')
+                        username, password = creds.split(':', 1)
+                    except Exception:
+                        username, password = None, None
+
+                    if username == PANEL_USER and password == PANEL_PASS:
+                        return func(*args, **kwargs)
+
+                # Missing/invalid creds → send browser prompt
+                from flask import make_response
+                resp = make_response('Unauthorized', 401)
+                resp.headers['WWW-Authenticate'] = 'Basic realm="Server Dashboard"'
+                return resp
+
+            # 3) Token configured but invalid/missing and no Basic configured → deny
+            if use_token_auth:
+                return ('Unauthorized: valid token required.', 403)
+
+            # 4) Public mode: if BOTH Basic and token are disabled, allow
+            if not (PANEL_USER and PANEL_PASS) and not use_token_auth:
                 return func(*args, **kwargs)
 
-            # 3. Check if any user/pass auth is configured
-            if not users:
-                # No users configured, check if token auth is also disabled
-                if not use_token_auth:
-                    return func(*args, **kwargs) # Public access
-                else:
-                    # Token auth is the ONLY method, but no valid token was provided.
-                    return ('Unauthorized: Access requires a valid token.', 403)
+            # Fallback (shouldn’t happen)
+            return ('Unauthorized: authentication required.', 401)
 
-            # 4. Fall back to standard HTTP Basic Auth
-            return auth.login_required(func)(*args, **kwargs)
+
+            # Fallback (shouldn’t happen)
+            return ('Unauthorized: authentication required.', 401)
+
+
         return decorated_view
 # --------------------------
 
@@ -865,6 +885,7 @@ def start_server():
     if users:
         print(f"Password auth enabled. User: {PANEL_USER}, Pass: {PANEL_PASS}")
         if PANEL_USER == "user" and PANEL_PASS == "pass":
+
             print("\n\033[93mWARNING: You are using the default username and password.\033[0m")
             print("It is strongly recommended to change them by re-running the installer:")
             print("  sudo python3 server.py --install-master\n")
@@ -899,6 +920,7 @@ def print_help():
     print("--cd                - Print the command to change to the script directory")
     print("--config            - Show configuration file path")
     print("-v / --version      - Show script version")
+
 
 
 def run_command(cmd, show_output=False):
@@ -1280,7 +1302,9 @@ def prompt_for_server(existing_servers):
     port = int(port_str) if port_str.isdigit() else 22
     country = input("Country Code (2 letters, for flag, e.g., US): ").strip().upper()
 
-    new_server = {"name": name, "host": host}
+    new_server = {"name"
+
+                        : name, "host": host}
     if user != 'root': new_server['user'] = user
     if port != 22: new_server['port'] = port
     if country: new_server['country'] = country
