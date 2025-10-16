@@ -14,11 +14,11 @@ ServerDashboard is a lightweight Python web app that provides a clean and mobile
 
 ## ⚙️ Automatic Installation (Recommended)
 
-Run this on your master node - This installs the panel to /opt, adds slaves if desired and can set up a system service at boot as well.
+Run this on your master node - This installs the panel to /opt/server-dashboard, adds system wide "server-dashboard" command, adds slaves with SSH key copy + optional setup, and can set up a system service at boot as well.
 
 ```bash
-wget https://raw.githubusercontent.com/i-william-hr/ServerDashboard/refs/heads/main/server_status.py
-python3 server_status.py --install-master
+wget https://raw.githubusercontent.com/i-william-hr/ServerDashboard/refs/heads/main/server-dashboard.py
+python3 server-dashboard.py --install-master
 ```
 
 Follow this steps to add slaves if not done inside the master installer or at later time:
@@ -28,12 +28,12 @@ Follow this steps to add slaves if not done inside the master installer or at la
 1. If you want to manually add slaves instead edit `servers.json`.
 3. Run:
    ```bash
-   server_status --install-slaves
+   server-dashboard --install-slaves
    ```
 
 Follow this steps to adjust the `.env` file if necessary (Port, User/Pass, Token...) (Optional, all set in Master installer)
    ```bash
-   server_status --config
+   server-dashboard --config
    nano PATH
    ```
    No manual script edits are required.
@@ -42,7 +42,7 @@ Follow this steps to adjust the `.env` file if necessary (Port, User/Pass, Token
 
 ---
 
-## 🛠️ Manual Installation
+## 🛠️ Manual Installation not recommended)
 
 1. **Clone the repository**  
    Copy this repo or just the `.py` and `.json` files.
@@ -91,7 +91,7 @@ Mote that manual installation does not come with a systemd start script.
 You can now add servers easily using the new `--add-server` option:
 
 ```bash
-server_status --add-server
+server-dashboard --add-server
 ```
 
 This interactive command:
@@ -100,7 +100,7 @@ This interactive command:
 - Optionally offers to **copy your public SSH key** to the new server (for this you need the root password or another local SSH key added).
 - Install required packages on slave:
    ```bash
-   server_status --install-slaves
+   server-dashboard --install-slaves
    ```
 - Restart to load the new server.
 
@@ -111,7 +111,7 @@ This interactive command:
 Run the server (ideally inside `screen` or `tmux`):
 
 ```bash
-server_status --start
+server-dashboard --start
 ```
 
 The app will display:
