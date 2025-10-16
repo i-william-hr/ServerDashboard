@@ -2,13 +2,13 @@
 
 This is a python app that provides a nice simple webinterface to monitor linux servers and services, using only SSH and few apt packages on targets.
 
-See Py and Json file for config (Minimum PY: SSH key, User/Pass or Token - Minimum JSON: Name - IP - SSH User - Country code)
+See Py and Json file for config (Minimum PY: SSH key, User/Pass or Token - Minimum JSON: Name, IP/Host, SSH User, Country code)
 
-The data is updated every 600 seconds by SSH from each host and the interface refreshes all 120 seconds.
+The data is updated every 300 seconds by SSH from each host and the interface refreshes all 120 seconds.
 
 A mobile interface designed for iPhone and Android with relatively high resolution screen is included, see DEMO pictures.
 
-Tested as root in screen but should work with any user if bind port is above 1024
+Tested as root in screen but should work with any user if bind port is above 1024 and the SSH key is accesible to it
 
 
 Do not forget:
@@ -21,9 +21,7 @@ Do not forget:
 
 - Set a TOKEN or User and Password
 
-- Generate ssh key on master (ssh-keygen), copy public key to slaves and set path for private key in Py (Default set is for ssh-keygen on Debian and Ubuntu)
-
-- ssh root@SLAVE from master for each slave to save the SSH host key
+- Generate ssh key on master (ssh-keygen), copy public key to slaves and set path for private key in Py (Default path set is for "ssh-keygen" without arguments as root on Debian and Ubuntu)
 
 
 
