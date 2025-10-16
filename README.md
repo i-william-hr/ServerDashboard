@@ -25,6 +25,8 @@ Add slaves to servers.json
 
 run "python3 server_status.py --install-master"
 
+edit the ".env" file if needed, no changes/config in the script are required
+
 
 - Manual installation:
 
