@@ -13,9 +13,13 @@ Tested as root in screen but should work with any user if bind port is above 102
 
 Do not forget:
 
-- Install packages on master: apt update && apt install -y python3 python3-venv python3-pip openssh-client
+- Install packages on master: apt update && apt install -y python3 python3-venv python3-pip openssh-client python3-paramiko python3-flask-httpauth python3-waitress
 
-- Install packages on each slave: apt update && apt install -y virt-what; apt install -y net-tools; apt install -y netcat-openbsd; apt install -y mysql-client; apt install -y mariadb-client-compat; apt install -y openssl
+- Create Python venv on master as per guide in Py file (might not be needed if all packages above are installed by apt, untested)
+
+- Install packages on slaves: apt update && apt install -y virt-what; apt install -y net-tools; apt install -y netcat-openbsd; apt install -y mysql-client; apt install -y mariadb-client-compat; apt install -y openssl
+
+- Info: Install of either mysql-client or mariadb-client-compat will fail dependig on OS/Version, this is fine as they work the same
 
 - Change bind from 127.0.0.1 to 0.0.0.0 in config if no reverse proxy is used, change port as desired
 
