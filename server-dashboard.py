@@ -18,17 +18,20 @@ What it does
 - manual Purge/Refresh button.
 
 Install on the dashboard host (Debian/Ubuntu):
-  Use the built-in installer: "sudo python3 server.py --install-master"
+  Use the built-in installer: "sudo python3 server-dashboard.py --install-master"
   Alternatively, manually install:
   sudo apt update && sudo apt install -y openssh-client python3 python3-venv python3-pip python3-paramiko python3-flask-httpauth python3-waitress
 
 Install on ALL REMOTE servers:
-  Use the built-in installer: "sudo python3 server.py --install-slaves"
+  Use the built-in installer: "sudo python3 server-dashboard.py --install-slaves"
   Alternatively, manually install:
   sudo apt update && sudo apt install -y virt-what; sudo apt install -y net-tools; sudo apt install -y netcat-openbsd; sudo apt install -y openssl; sudo apt install -y mysql-client; sudo apt install -y mariadb-client-compat
 
-Run:
-  python3 server.py --start
+Run - CLI:
+  python3 server-dashboard.py --start
+
+Run - Service:
+ service server_status start
 
 Env vars:
   SECRET_TOKEN (default token)
