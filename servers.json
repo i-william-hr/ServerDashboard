@@ -1,20 +1,24 @@
+// The only required fields are "name" and "host".
+// If not provided, "user" defaults to "root" and "port" defaults to 22.
+// The "country" field for the flag is optional.
 [
   {
-    "name": "server-1",
+    "name": "Server-1",
     "host": "171.22.1.1",
-    "user": "root",
     "country": "DE"
   },
   {
-    "name": "server-1",
-    "host": "172.245.1.10",
+    "name": "Server-2",
+    "host": "172.245.1.1",
     "user": "root",
+    "port": 2222,
     "country": "IE"
   },
   {
-    "name": "serever-3",
-    "host": "192.71.3.5",
+    "name": "Server-3",
+    "host": "192.71.1.1",
     "user": "root",
+    "port": 2222,
     "country": "NL"
   }
 ]
