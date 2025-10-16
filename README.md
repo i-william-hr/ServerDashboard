@@ -37,7 +37,9 @@ This monitors/Shows:
 
 - CPU Model - Memory Used/Free/Total (with usage bar in Green/Yellow/Red) - Disk Used/Free/Total (also with usage bar)
 
-- Top processes by CPU (in %) and Memory (in % and in MB)
+- Top 5 processes by CPU (in %) and Memory (in % and in MB)
+
+- Logged in users with IP or terminal if local
 
 -
 
