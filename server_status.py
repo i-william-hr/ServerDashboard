@@ -3,12 +3,12 @@ Server Status - single-file Flask webapp (sample tailored)
 
 What it does
 - Runs on the Waitress production WSGI server.
-- Binds to 127.0.0.1 so it's only accessible via a reverse proxy like Nginx. Change on bottom if desired.
+- Binds to 127.0.0.1 so it's only accessible via a reverse proxy like Nginx.
 - Protects the web UI with two methods:
   1. HTTP Basic Authentication (user: wm, pass: wm).
   2. A secret token in the URL (e.g., ?auth=YOUR_TOKEN) for easy access from bookmarks.
 - pings each server and shows latency (ms).
-- connects via SSH to collect: Server Type, OS, Kernel, uptime, load, CPU, RAM, disk, network usage, top processes, users, updates, and service status (Nginx, MySQL, etc.).
+- connects via SSH to collect: Server Type, OS, Kernel, uptime, load, CPU, RAM, disk, network usage, top processes, users, updates, service status, and Nginx configuration details.
 - Automatically creates a daily cron job on remote hosts to check for updates.
 - Displays usage bars and threshold-based colors (green/yellow/red) for key metrics.
 - Caches results for 10 minutes (override via CACHE_TTL).
@@ -23,17 +23,17 @@ Install on the dashboard host (Debian/Ubuntu):
   pip install flask paramiko flask-httpauth waitress
 
 Install on ALL REMOTE servers:
-  sudo apt update && sudo apt install -y virt-what; sudo apt install -y net-tools; sudo apt install -y netcat-openbsd; sudo apt install -y mysql-client; sudo apt install -y mariadb-client-compat
+  sudo apt update && sudo apt install -y virt-what; sudo apt install -y net-tools; sudo apt install -y netcat-openbsd; sudo apt install -y mysql-client; sudo apt install -y mariadb-client-compat; sudo apt install -y openssl
 
 Run:
   # For better security, set your own secret token
   export SECRET_TOKEN="change-me-to-something-long-and-random"
-  python3 ssh.py  # listens on 127.0.0.1:8889
+  python3 server.py  # listens on 127.0.0.1:8889
 
 Env vars:
   SECRET_TOKEN (default TOKEN)
   SSH_KEY_PATH (default /root/.ssh/id_ed25519)
-  CACHE_TTL (default 600)
+  CACHE_TTL (default 300)
   FLASK_RUN_HOST / FLASK_RUN_PORT (defaults 127.0.0.1 / 8889)
 
 """
@@ -54,7 +54,7 @@ import re
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 SERVERS_FILE = os.path.join(APP_DIR, 'servers.json')
 SSH_KEY_PATH = os.environ.get('SSH_KEY_PATH', '/root/.ssh/id_ed25519')
-CACHE_TTL = int(os.environ.get('CACHE_TTL', '600'))
+CACHE_TTL = int(os.environ.get('CACHE_TTL', '300'))
 SSH_CONNECT_TIMEOUT = 5
 PING_COUNT = 1
 SECRET_TOKEN = os.environ.get('SECRET_TOKEN', 'TOKEN')
@@ -128,7 +128,7 @@ def ssh_run_command(host, user, key_path, cmd):
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         client.connect(hostname=host, username=user, key_filename=key_path, timeout=SSH_CONNECT_TIMEOUT)
-        stdin, stdout, stderr = client.exec_command(cmd, timeout=20) # Increased timeout for service checks
+        stdin, stdout, stderr = client.exec_command(cmd, timeout=30) # Increased timeout for service/nginx checks
         out = stdout.read().decode('utf-8', errors='ignore')
         err = stderr.read().decode('utf-8', errors='ignore')
         client.close()
@@ -248,6 +248,58 @@ ps aux | grep 'python3.*\\.py' | grep -v 'grep' | while read -r line; do
     echo "$netstat_output" | while read -r net_line; do test_tcp_connection "$(echo "$net_line" | awk '{print $4}')" "$script_name"; done;
 done;
 echo "SERVICE_STATUS_END"
+""",
+        'nginx_config': """
+#!/bin/bash
+echo "NGINX_CONFIG_START";
+get_all_configs() {
+    local config_file="$1"; local parsed_files="$2";
+    if [ ! -f "$config_file" ] || [[ "$parsed_files" == *"$config_file"* ]]; then return; fi;
+    echo "$config_file"; parsed_files+=" $config_file";
+    local includes=$(grep -E '^\\s*include' "$config_file" | sed -e 's/#.*//' -e 's/^\\s*include\\s*//' -e 's/;\\s*$//' || true);
+    for inc in $includes; do for file in $inc; do get_all_configs "$file" "$parsed_files"; done; done;
+};
+if ! command -v nginx >/dev/null 2>&1 || ! command -v openssl >/dev/null 2>&1; then echo "NGINX_CONFIG_END"; exit 0; fi;
+nginx_conf="/etc/nginx/nginx.conf";
+all_config_files=$(get_all_configs "$nginx_conf" "" | tr ' ' '\\n' | sort -u | tr '\\n' ' ');
+if [ -z "$all_config_files" ]; then echo "NGINX_CONFIG_END"; exit 0; fi;
+parsed_data=$(cat $all_config_files | awk '
+    function process_server_block() {
+        if (server_name) {
+            print "HOST|" server_name "|" ports "|" (has_ssl ? cert_path : "NO_SSL");
+            print proxies_str;
+        }
+        server_name=""; ports=""; cert_path=""; has_ssl=0; proxies_str="";
+    }
+    {
+        gsub(/#.*/, ""); gsub(/;/, "");
+        if ($0 ~ /^\\s*server\\s*{/) { in_server = 1; brace_level = 1; next; }
+        if (in_server) {
+            brace_level += gsub(/{/, "{"); brace_level -= gsub(/}/, "}");
+            if ($1 == "server_name") { server_name = $2; }
+            if ($1 == "listen") { port = $2; sub(/\\[::\\]:/, "", port); protocol = ($0 ~ /\\[::\\]/ || $0 ~ /ipv6only=on/) ? "IPv6" : "IPv4"; ports = ports " " port "/" protocol; if ($0 ~ /ssl/) { has_ssl = 1; } }
+            if ($1 == "ssl_certificate") { cert_path = $2; }
+            if ($1 == "location") { current_location = $2; }
+            if ($1 == "proxy_pass") { proxies_str = proxies_str "PROXY|" server_name "|" current_location "|" $2 "\\n"; }
+            if (brace_level == 0) { process_server_block(); in_server = 0; }
+        }
+    }
+');
+echo "$parsed_data" | grep "^HOST|" | sort | while IFS='|' read -r type host port_list cert_path; do
+    ssl_status="NO_SSL";
+    if [ "$cert_path" != "NO_SSL" ]; then
+        if [ -n "$cert_path" ] && [ -f "$cert_path" ]; then
+            if exp_date=$(openssl x509 -in "$cert_path" -noout -enddate 2>/dev/null | cut -d= -f2); then
+                if [ "$(date -d "$exp_date" +%s)" -gt "$(date +%s)" ]; then ssl_status="OK"; else ssl_status="Expired"; fi;
+            else ssl_status="Invalid"; fi;
+        else ssl_status="Not_Found"; fi;
+    fi;
+    echo "HOST:$host:$port_list:$ssl_status";
+done;
+echo "$parsed_data" | grep "^PROXY|" | sort | while IFS='|' read -r type host location target; do
+    echo "PROXY:$host$location:$target";
+done;
+echo "NGINX_CONFIG_END";
 """
     }
 
@@ -320,6 +372,20 @@ echo "SERVICE_STATUS_END"
                 if len(parts) >= 3:
                     service_status.append({'name': parts[0], 'port': parts[1], 'status': parts[2], 'info': parts[3] if len(parts) > 3 else ''})
         
+        nginx_config_raw = results.get('nginx_config', '')
+        nginx_hosts = []
+        nginx_proxies = []
+        if "NGINX_CONFIG_START" in nginx_config_raw:
+            config_block = nginx_config_raw.split("NGINX_CONFIG_START\n")[1].split("NGINX_CONFIG_END")[0]
+            for line in config_block.strip().splitlines():
+                if line.startswith("HOST:"):
+                    parts = line.replace("HOST:", "").split(':', 2)
+                    if len(parts) == 3:
+                        nginx_hosts.append({'host': parts[0], 'details': parts[1], 'ssl_status': parts[2]})
+                elif line.startswith("PROXY:"):
+                    parts = line.replace("PROXY:", "").split(':', 1)
+                    if len(parts) == 2:
+                        nginx_proxies.append({'path': parts[0], 'target': parts[1]})
 
         cpu_model = results.get('cpu_model', '').strip()
         cpu_mhz = results.get('cpu_mhz', '').strip()
@@ -333,7 +399,7 @@ echo "SERVICE_STATUS_END"
         mem_usage_percent = disk_usage_percent = 0; net_rx_mbits = net_tx_mbits = 0.0; upgradable_packages = 0
         cores = 1; load_1m = 0; load_str = "0 0 0"
         cpu_model = cpu_mhz = os_info = kernel_version = top_procs_cpu = top_procs_mem = logged_in_users = server_type = ''
-        service_status = []
+        service_status = []; nginx_hosts = []; nginx_proxies = []
 
     data['ssh'] = {
         'uptime': uptime, 'load': load_str, 'load_1m': load_1m, 'cores': cores,
@@ -341,7 +407,8 @@ echo "SERVICE_STATUS_END"
         'disk_total_bytes': disk_total, 'disk_free_bytes': disk_free, 'disk_used_bytes': disk_used, 'disk_usage_percent': disk_usage_percent,
         'net_rx_mbits': net_rx_mbits, 'net_tx_mbits': net_tx_mbits, 'server_type': server_type, 'upgradable_packages': upgradable_packages,
         'cpu_model': cpu_model, 'cpu_mhz': cpu_mhz, 'os_info': os_info, 'kernel_version': kernel_version,
-        'top_procs_cpu': top_procs_cpu, 'top_procs_mem': top_procs_mem, 'logged_in_users': logged_in_users, 'service_status': service_status
+        'top_procs_cpu': top_procs_cpu, 'top_procs_mem': top_procs_mem, 'logged_in_users': logged_in_users, 'service_status': service_status,
+        'nginx_hosts': nginx_hosts, 'nginx_proxies': nginx_proxies
     }
     return data
 
@@ -470,11 +537,28 @@ async function loadStatus(){
             });
             html+=`<div class="small" style="flex-basis: 100%;">Service Status<div class="service-status-list">${serviceHtml}</div></div>`;
         }
+        
+        if (s.ssh.nginx_hosts && s.ssh.nginx_hosts.length > 0) {
+            let nginxHtml = '';
+            s.ssh.nginx_hosts.forEach(host => {
+                let sslText = '';
+                if (host.ssl_status === 'OK') {
+                    sslText = ' <span class="status-ok">SSL</span>';
+                } else if (host.ssl_status !== 'NO_SSL') {
+                    sslText = ` <span class="status-bad">SSL (${escapeHtml(host.ssl_status)})</span>`;
+                }
+                nginxHtml += `<div><strong>Host:</strong> ${escapeHtml(host.host)} ${escapeHtml(host.details)}${sslText}</div>`;
+            });
+            s.ssh.nginx_proxies.forEach(proxy => {
+                nginxHtml += `<div><strong>Proxy:</strong> ${escapeHtml(proxy.path)} -&gt; ${escapeHtml(proxy.target)}</div>`;
+            });
+            html+=`<div class="small" style="flex-basis: 100%;">Nginx Configuration<div class="procs-list">${nginxHtml}</div></div>`;
+        }
 
         if(s.ssh.logged_in_users){
             html+=`<div class="small" style="flex-basis: 100%;">Logged In Users<div class="procs-list">${escapeHtml(s.ssh.logged_in_users)}</div></div>`;
         }
-        
+
         if(s.ssh.top_procs_cpu){
             html+=`<div class="small" style="flex-basis: 100%;">Top Processes (%CPU)<div class="procs-list">${escapeHtml(s.ssh.top_procs_cpu)}</div></div>`;
         }
@@ -541,6 +625,7 @@ function startRefreshTimer() {
 loadStatus();
 updateCountdown();
 startRefreshTimer();
+
 
 </script>
 </body>
